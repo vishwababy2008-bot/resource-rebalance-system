@@ -1,11 +1,10 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
 let cache = { key: '', text: '', at: 0 };
 
 // One batched call for all recommendations; cached 30s to protect free-tier quota.
 exports.explain = async (recs) => {
   if (!recs.length) return 'No transfers needed right now. All hospitals have adequate cover.';
-  if (!process.env.GEMINI_API_KEY) return 'Gemini API key not configured.';
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) return 'Gemini API key not configured.';
 
   const key = JSON.stringify(recs.map(r => [r.item, r.from.id, r.to.id, r.quantity]));
   if (cache.key === key && Date.now() - cache.at < 30000) return cache.text;
@@ -18,11 +17,20 @@ Return a numbered list in the same order.\n\n` +
     ).join('\n');
 
   try {
-    const model = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-      .getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.0-flash' });
-    const res = await model.generateContent(prompt);
-    cache = { key, text: res.response.text(), at: Date.now() };
-    return cache.text;
+    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      }
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(`${res.status} ${data.error?.message || ''}`);
+    const text = (data.candidates?.[0]?.content?.parts || []).map(p => p.text).join('');
+    cache = { key, text, at: Date.now() };
+    return text;
   } catch (e) {
     console.error('Gemini error:', e.message);
     return 'Explanation unavailable (Gemini request failed).';

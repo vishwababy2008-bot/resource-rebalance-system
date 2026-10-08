@@ -30,5 +30,19 @@ router.post('/simulate/spike', async (req, res) => {
   const r = await sim.spike(hospitalId, item, factor);
   r ? res.json(r) : res.status(404).json({ error: 'Hospital or item not found' });
 });
-
+// Demo: force one clear shortage + one surplus for an item (just open in browser)
+router.get('/demo/shortage', async (req, res) => {
+  const item = req.query.item || 'Oxygen Cylinders';
+  const hospitals = await Hospital.find();
+  if (hospitals.length < 2) return res.status(400).json({ error: 'Need at least 2 hospitals' });
+  const [donor, needy] = hospitals;
+  const d = donor.resources.find(r => r.item === item);
+  const n = needy.resources.find(r => r.item === item);
+  if (!d || !n) return res.status(404).json({ error: 'Item not found' });
+  d.stock = d.capacity; d.ratePerHour = 1; d.history = [];
+  n.stock = 3; n.history = [];
+  await donor.save();
+  await needy.save();
+  res.json({ item, donor: donor.name, needy: needy.name });
+});
 module.exports = router;
